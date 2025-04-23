@@ -10,7 +10,7 @@ bag_imu = Path("C:/Users/akinm/OneDrive/Masaüstü/otter/ouster.bag")
 typestore = get_typestore(Stores.ROS2_FOXY)
 
 # Data lists
-u_data, twist_data, imu_data = [], [], []
+u_data, twist_data, imu_data, tau_data = [], [], [], []
 
 ### 1. u_actual and twist data from inputs.bag ###
 with AnyReader([bag_inputs], default_typestore=typestore) as reader:
@@ -27,6 +27,12 @@ with AnyReader([bag_inputs], default_typestore=typestore) as reader:
         t = ts * 1e-9
         twist = msg.twist
         twist_data.append([t, twist.linear.x, twist.linear.y, twist.angular.z])
+
+    for con, ts, raw in reader.messages(connections=[connections["/otter/tau"]]):
+        msg = reader.deserialize(raw, con.msgtype)
+        t = ts * 1e-9
+        tau = msg.wrench
+        tau_data.append([t, tau.force.x, tau.force.y, tau.torque.z])
 
 ### 2. IMU data from ouster.bag (Sampled in blocks of 10) ###
 imu_temp = []
@@ -58,6 +64,7 @@ for i in range(0, len(imu_temp), 10):
 ### 3. Converting to Data Frames ###
 df_u = pd.DataFrame(u_data, columns=["time", "u0", "u1"]).iloc[5:].reset_index(drop=True)
 df_twist = pd.DataFrame(twist_data, columns=["time", "vx", "vy", "wz"]).iloc[5:].reset_index(drop=True)
+df_tau = pd.DataFrame(tau_data, columns=["time", "fx", "fy", "mz"]).iloc[5:].reset_index(drop=True)
 df_imu = pd.DataFrame(imu_data, columns=["time", "ax", "ay", "az", "wx", "wy", "wz_imu"]).iloc[5:].reset_index(drop=True)
 
 ### 4. Time normalization (elapsed time) ###
@@ -66,23 +73,28 @@ df_imu = pd.DataFrame(imu_data, columns=["time", "ax", "ay", "az", "wx", "wy", "
 t0 = df_u["time"].iloc[0]
 t1 = df_twist["time"].iloc[0]
 t2 = df_imu["time"].iloc[0]
+t3 = df_tau["time"].iloc[0]
 df_u["time"] -= t0
 df_twist["time"] -= t1
 df_imu["time"] -= t2
+df_tau["time"] -= t3
 
 print(df_u["time"].iloc[-1])
 print(df_twist["time"].iloc[-1])
 print(df_imu["time"].iloc[-1])
+print(df_tau["time"].iloc[-1])
 
 ### 5. Concatenation part ###
 min_len = min(len(df_u), len(df_twist), len(df_imu))
 df_u = df_u.iloc[:min_len].reset_index(drop=True)
 df_twist = df_twist.iloc[:min_len].reset_index(drop=True)
+df_tau = df_tau.iloc[:min_len].reset_index(drop=True)
 df_imu = df_imu.iloc[:min_len].reset_index(drop=True)
 
 df_merged = pd.concat([
     df_u,
     df_twist[["vx", "vy", "wz"]],
+    df_tau[["fx", "fy", "mz"]],
     df_imu[["ax", "ay", "az", "wx", "wy", "wz_imu"]]
 ], axis=1)  # This code concatenates the DataFrames with respect to the timestamp columns.
 
